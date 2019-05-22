@@ -11,7 +11,7 @@ library(dplyr)
 ```
 
 # Data Curation, Parsing, and Management
-Out dataset comes from https://opendata.cityofnewyork.us, which contains numerous datasets related to New York City.  We are interested in the NYPD Motor Vehicle Collisions dataset (https://data.cityofnewyork.us/api/views/h9gi-nx95/rows.csv?accessType=DOWNLOAD) to study the distribution, causes, and relationships found in NYC accidents.
+Out dataset comes from https://opendata.cityofnewyork.us, which contains numerous datasets related to New York City.  We are interested in the NYPD Motor Vehicle Collisions dataset (https://data.cityofnewyork.us/api/views/h9gi-nx95/rows.csv?accessType=DOWNLOAD) to study the distribution, causes, and relationships found in NYC accidents.  This topic is important because studying where crashes are clustered can help us find particularly dangerous intersections for which we can then devise solutions to reduce the occurence of accidents.  This topic is important with respect to data science because it shows the power of predictive ability, and is an example of how we can use statistical techniques and the data science pipeline to produce insights into a topic that affects people in a concrete way.
 
 The dataset is given as a csv file, so we can read its contents into a dataframe.  We will two logical columns which indicate whether or not a crash resulted in an injury or death.  We will randomly choose 10 rows from the dataset to get an idea of our data looks like.
 ```{r read_csv, cache=TRUE}
@@ -115,6 +115,8 @@ We first set the seed to 320 so that our results are reproducible.  Then we prep
 
 We create 5 partitions in our data for use in cross validation, use the train function to train the model on the parameters it finds through cross validation.
 After the model is trained, we use the predict() function to see how well our model works on the test data.  The results of this are pased into table to give us the confusion matrix.  Finally, we use the plotROC package to create our ROC curve.
+
+The code below is templated off of the code found at http://www.hcbravo.org/IntroDataSci/, which also contains lecture notes that explain concepts in great detail.
 
 
 ```{r, cache=TRUE}
