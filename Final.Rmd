@@ -1,0 +1,188 @@
+---
+title: "Final Project"
+author: "Franklin Yang"
+date: "5/20/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+setwd("~/Documents/School/320")
+library(dplyr)
+```
+
+# Data Curation, Parsing, and Management
+Out dataset comes from https://opendata.cityofnewyork.us, which contains numerous datasets related to New York City.  We are interested in the NYPD Motor Vehicle Collisions dataset (https://data.cityofnewyork.us/api/views/h9gi-nx95/rows.csv?accessType=DOWNLOAD) to study the distribution, causes, and relationships found in NYC accidents.
+
+The dataset is given as a csv file, so we can read its contents into a dataframe.  We will two logical columns which indicate whether or not a crash resulted in an injury or death.  We will randomly choose 10 rows from the dataset to get an idea of our data looks like.
+```{r read_csv, cache=TRUE}
+library(tidyverse)
+collisions_tab <- read_csv("NYPD_Motor_Vehicle_Collisions.csv")
+collisions_tab <- collisions_tab %>% mutate(is_fatal=ifelse(`NUMBER OF PERSONS KILLED` >= 1,"fatal","nonfatal"))
+collisions_tab <- collisions_tab %>% mutate(is_injure=ifelse(`NUMBER OF PERSONS INJURED` >= 1,"injury","noInjuries"))
+set.seed(320)
+sample_n(collisions_tab,10)
+```
+# Exploratory Data Analysis
+We wish to perform some exploratory data analysis to get an overview of the data.  One way to get an idea of the severity of these accidents is to compute the mean and standard deviation for the number of injuries and deaths from each accidents.
+```{r, cache=TRUE}
+collisions_tab %>% summarize(mean_deaths = mean(`NUMBER OF PERSONS KILLED`,na.rm = TRUE), std_deaths = sd(`NUMBER OF PERSONS KILLED`,na.rm = TRUE), mean_injuries = mean(`NUMBER OF PERSONS INJURED`,na.rm = TRUE), std_injuries = sd(`NUMBER OF PERSONS INJURED`,na.rm = TRUE))
+```
+We might also be interested in the leading causes of vehicular accidents, so we could construct a histogram to view the top 10 most common causes.  Our dataset contains five columns named contributing factor vechicle 1-5, which gives the contributing factor (to the accident) for each vehicle involved in the accident.  We can use the group_by function to group the rows by the contributing factor and then use the tally function to compute the number of occurences of each type of contributing factor.  We do this for each column for vehicles 1-5, removing entries that contain NA.  We then sum the tallies of the individual five columns to get a final tally.  To actually implement this, we execute a full join between all the resultant tally dataframes joining on the contributing factor.  After we do so, we set any NA values to 0, as this means that for that given tally dataframe, the tally was 0 (the full join would see that a row with matching contributing factor doesn't exist, meaning that the tally must have been 0).  Finally, we execute a row-wise sum, use the arrange function to sort the contributing factors from least to greatest, and remove the rows describing contributing factors that were encoded, but do not actually provide a specific contributing factor (such as 0 or unspecified).  Next, we plot the top fifteen contributing factors (extracted by using head) in a histogram.  
+```{r, cache=TRUE}
+causes1 <- collisions_tab %>%
+  group_by(`CONTRIBUTING FACTOR VEHICLE 1`) %>% 
+  tally() %>%
+  select(cause=`CONTRIBUTING FACTOR VEHICLE 1`, n) 
+causes2 <- collisions_tab %>%
+  group_by(`CONTRIBUTING FACTOR VEHICLE 2`) %>% 
+  tally() %>%
+  select(cause=`CONTRIBUTING FACTOR VEHICLE 2`, n)
+causes3 <- collisions_tab %>%
+  group_by(`CONTRIBUTING FACTOR VEHICLE 3`) %>% 
+  tally() %>%
+  select(cause=`CONTRIBUTING FACTOR VEHICLE 3`, n)
+causes4 <- collisions_tab %>%
+  group_by(`CONTRIBUTING FACTOR VEHICLE 4`) %>% 
+  tally() %>%
+  select(cause=`CONTRIBUTING FACTOR VEHICLE 4`, n)
+causes5 <- collisions_tab %>%
+  group_by(`CONTRIBUTING FACTOR VEHICLE 5`) %>% 
+  tally() %>%
+  select(cause=`CONTRIBUTING FACTOR VEHICLE 5`, n)
+
+causes <- causes1 %>% 
+  full_join(causes2,by="cause") %>% 
+  full_join(causes3,by="cause") %>% 
+  full_join(causes4,by="cause") %>% 
+  full_join(causes5,by="cause")
+causes[is.na(causes)] <- 0
+
+causes['count'] = causes['n'] + causes['n.x'] + causes['n.y'] + causes['n.x.x'] + causes['n.y.y'] 
+
+causes <- causes %>% 
+  select(cause,count) %>%
+  arrange(desc(count))
+library(scales)
+
+causes[-1:-2,] %>%
+  head(15) %>%
+  ggplot(aes(x = reorder(cause, -count), y = count)) +
+  geom_bar(stat = "identity") + 
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1)) + 
+  labs(x="contributing factor", y="count") + 
+  ggtitle("contributing factors of NYC crashes by frequency")
+```
+
+#Hypothesis Testing and Machine Learning
+We would like to investigate whether or not the mean number of persons injured per accident is the same between all five boroughs of New York.  We first select two columns of the dataset, BOROUGH and NUMBER OF PERSONS INJURED from the dataset and then use the na.omit() function to remove all rows that contain NA (missing values).  Next, we can use the aov function to perform an ANOVA test where the null hypothesis is that the true mean number of persons injured in each borough is the same as every other borough.  The alternate hypothesis is that the mean number of persons injured in at least one borough is different from the others.  
+
+Calling summary() on the output of aov() gives us the a readable form of the result of this ANOVA test that reveals that the p-value is very small (<2e-16), so the probability of observing a result as contradictory or even more contradictory to our null hypothesis (of an equal mean number of injuries between boroughs) as we have seen is incredibly small, so we reject the null hypothesis in favor of the alternative hypothesis that at least one of the means is different from the others.  
+
+With this new information, we can perform a Tukey test using the function TukeyHSD.  ANOVA tells is if at least one of the means differ, and Tukey tells us which pairs of means are significantly different from each other.  The ouput of this test is a confidence interval for each pair of boroughs.  This confidence interval is the 95% confidence interval for the difference between the means of two boroughs.  If this interval contains 0, then the difference is not statistically significant.  In our case, none of the intervals contain 0 (the lwr/lower bound and upr/upper bound both have the same sign), so every borough has a significantly different mean number of injuries per incident than every other borough.  This tells us that on average, accidents in Brooklyn result in significantly more injuries than those in Bronx, and those in Bronx signficantly more than Queens, and so on.
+```{r, cache=TRUE}
+bor_injur_tab <- collisions_tab %>% 
+  select(BOROUGH, `NUMBER OF PERSONS INJURED`) %>% 
+  na.omit()
+bor_injur <- aov(`NUMBER OF PERSONS INJURED` ~ BOROUGH, data=bor_injur_tab)
+summary(bor_injur)
+TukeyHSD(bor_injur)
+bor_injur_tab %>% 
+  group_by(BOROUGH) %>%
+  summarize(mean_persons_injured=mean(`NUMBER OF PERSONS INJURED`)) %>%
+  arrange(desc(mean_persons_injured))
+```
+We can perform a similar analysis to determine if the mean number of persons killed is the same.
+
+Again, we see that the p-value from the ANOVA test is very small, so we know that the mean nubmer of persons killed is not the same.  The Tukey test reveals that the mean number of persons killed between Staten Island, Queens, Brooklyn, and the Bronx are not significantly different, the means between the Bronx and Manhattan aren't significantly different, but Manhattan has a signficantly less mean number of deaths than Staten Island, Queens, and Brooklyn.
+```{r, cache=TRUE}
+bor_death_tab <- collisions_tab %>% 
+  select(BOROUGH, `NUMBER OF PERSONS KILLED`) %>% 
+  na.omit()
+bor_death <- aov(`NUMBER OF PERSONS KILLED` ~ BOROUGH, data=bor_death_tab)
+summary(bor_death)
+TukeyHSD(bor_death)
+bor_death_tab %>% 
+  group_by(BOROUGH) %>%
+  summarize(mean_persons_killed=mean(`NUMBER OF PERSONS KILLED`)) %>%
+  arrange(desc(mean_persons_killed))
+```
+
+Next, we will try and predict whether or not an accident results in injuries given the time and location (in the form of latitude and longitude) or an accident.  We will use the random forest classifier with 5-fold cross validation to determine which parameters to use.  
+
+We first set the seed to 320 so that our results are reproducible.  Then we prepare our dataset by extracting only the attributes we need using a select statement and removing entries that contain NA with na.omit().  We sample 10% of the data as since our dataset is very large, training on the full dataset would require too much time.  This dataset is then split by randomly picking half of the entities to be placed in a training set and the other half to be in the testing set.  
+
+We create 5 partitions in our data for use in cross validation, use the train function to train the model on the parameters it finds through cross validation.
+After the model is trained, we use the predict() function to see how well our model works on the test data.  The results of this are pased into table to give us the confusion matrix.  Finally, we use the plotROC package to create our ROC curve.
+
+
+```{r, cache=TRUE}
+set.seed(320)
+master_deaths_df <- collisions_tab %>%
+  sample_frac(0.1) %>% 
+  select(TIME,LATITUDE,LONGITUDE,is_injure) %>%
+  mutate(is_injure = factor(is_injure,levels=c("noInjuries","injury"))) %>% 
+  na.omit()
+train_death_df <- master_deaths_df %>% sample_frac(0.5)
+test_death_df <- master_deaths_df %>% anti_join(train_death_df)
+
+library(caret)
+cv_partition <- createFolds(train_death_df$is_injure, k=5)
+fit_control <- trainControl(
+  method = "cv",
+  number = 5,
+  verboseIter = TRUE,
+  indexOut = cv_partition,
+  summaryFunction=twoClassSummary,
+  classProbs=TRUE,
+  savePredictions=TRUE)
+
+ rf_fit <-train(is_injure~.,
+                      data = train_death_df,
+                      method = "rf",
+                      nTrees=200,
+                      trControl = fit_control,
+                      metric="ROC")
+ rf_test_predictions <- predict(rf_fit, newdata = test_death_df %>% select(-is_injure))
+ table(pred=rf_test_predictions,
+      observed=test_death_df$is_injure)
+ roc_df <-
+  rf_fit$pred %>%
+    filter(mtry == 2)
+ library(plotROC)
+ roc_df %>%
+  ggplot(aes(m=noInjuries,
+             d=factor(obs, levels=c("injury","noInjuries")))) +
+    geom_roc() +
+    coord_equal() +
+    style_roc() 
+```
+An observant reader may recognize that the number of entities with no injuries is much greater than the number of entities with injuries.  This results in an unbalanced dataset, where the number of examples for one class (no injuries) is much greater than that of another class (injuries).  There are ways to combat this (oversampling of the minority class, undersampling of the majority class), but their implementation will be left as an exercise to the reader. (https://towardsdatascience.com/dealing-with-imbalanced-classes-in-machine-learning-d43d6fa19d2)  
+
+# Visualization
+In order to better visualize the data, we can create a graphical representation using the leaflet package.  Leaflet is a library for displaying data on maps that is cross platform, but in our case we will use the API for R (https://rstudio.github.io/leaflet/).  
+
+In order for leaflet to be able to determine where to place our data points, there must be two attributes in the source data specifying the longitude and latitude of an entity.  Each entity, then, will show up as an icon or marker on the map at its specified location.  We can use icons() to construct an icon: it takes an iconUrl so we can use publicly available open source icon packs from the web (like the Ionicons pack I'm using here).  
+
+Next, recognizing the limited computational power of most consumer devices and the immense size of the full dataset, we sample a subset of the full dataset to display.
+
+The call ot addTiles gives us the mapping data for New York, while the call to addMarkers the icon we specified earlier to the map for each entity.  We specify the attributes in the data that correspond to latitude and longitude so the function knows where to place each icon for a given attribute.  The group attribute will allow us to hide and show these markers as the reader pleases later.  Due to the large number of data points, we've included clusterOptions that will group a high conentration of markers in a small location into one larger marker that displays the number of markers within a certain area.  Though this modification makes the map more navigable, clustering doesn't allow us to see the spatial distribution of accidents as easily.  
+
+To remedy this, we add a new group of markers with the addCircles call.  We give this group a name so we can refer to it later.  Clustering is not enabled for this group, so we can see how the crashes are distributed.  Finally, we make a call to addLayersControl, which provides radio buttons to the user to allow them to swap between the circle markers or a clustered representation.  Under baseGroups, I've provided a vector of the group names specified earlier.  Since I've specified these groups under baseGroups, leaflet enforces that only one group can be visible at a time.  This behavior is desired, as having both visible at the same time would result in an overly cluttered visualization that hinders a viewers ability to view the data.
+```{r, cache=TRUE} 
+library(leaflet)
+
+crashIcon <- icons(
+  iconUrl = "https://ionicons.com/ionicons/svg/md-alert.svg",
+  iconWidth = 25, iconHeight = 25,
+  iconAnchorX = 0, iconAnchorY = 0
+)
+leaflet(collisions_tab %>% sample_n(1000)) %>% 
+  addTiles() %>% 
+  addMarkers(lng=~LONGITUDE, lat=~LATITUDE, icon=crashIcon, clusterOptions = markerClusterOptions(),group="clustered",popup=~paste("Date:",DATE,"<br>Time: ",TIME,"<br>")) %>%
+  addCircles(lng=~LONGITUDE, lat=~LATITUDE, group="not clustered", radius=15, opacity = 1.0, color=~ifelse(is_fatal=="fatal","red",ifelse(is_injure=="injure","orange","yellow"))) %>%
+  addLayersControl(
+    baseGroups = c("clustered","not clustered"),
+    options = layersControlOptions(collapsed = FALSE)
+)
+```
